@@ -86,33 +86,28 @@ if __name__ == "__main__":
 		# luego recibimos el mensaje usando la función que programamos
 		# esta función entrega el mensaje en string (no en bytes) y sin el end_of_message
 		recv_message = receive_full_message(req_socket, buff_size, end_of_header)
+		
+		(req_header, req_body) = parse_HTTP_message(recv_message)
 
-		print(f' -> Se ha recibido el siguiente mensaje: {recv_message}')
-
-		(header, body) = parse_HTTP_message(recv_message)
-
-
-		# respondemos indicando que recibimos el mensaje
-		response_body = b"""
-<!DOCTYPE html>
-<html lang="es">
-	<head>
-		<meta charset="UTF-8">
-		<title>Paso 1</title>
-	</head>
-	<body>
-		<h1>Esto es un proxy?</h1>
-	</body>
-</html>
-		"""
+		req_host = [match for match in req_header if b"Host" in match]
+		req_host = req_host[0]
+		req_host = req_host[req_host.rfind(b"Host: ") + len(b"Host: "):]
+		
 		config = open("config.json", "r")
 		content = js.load(config)
-
-		response_header = b"HTTP/1.1 200 OK\r\nServer: python3.12\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: " + str(len(response_body)).encode() + b"\r\nX-ElQuePregunta: " + content["nombre"].encode()
-
-		response_header = response_header.split(b"\r\n")
 		
-		response_message= create_HTTP_message((response_header,response_body))
+		out_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		
+		out_socket.connect((req_host.decode(),80))
+		out_socket.send(recv_message)
+		server_response = receive_full_message(out_socket, buff_size, end_of_header)
+		out_socket.close()
+		req_socket.send(server_response)
+		req_socket.close()
+
+
+
+		"""response_message= create_HTTP_message((response_header,response_body))
 		
 		# el mensaje debe pasarse a bytes antes de ser enviado, para ello usamos encode
 		req_socket.send(response_message)
@@ -122,4 +117,4 @@ if __name__ == "__main__":
 		req_socket.close()
 		print(f"conexión con {new_socket_address} ha sido cerrada")
 
-		# seguimos esperando por si llegan otras conexiones
+		# seguimos esperando por si llegan otras conexiones"""
