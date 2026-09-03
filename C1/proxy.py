@@ -1,4 +1,5 @@
 import socket
+import json as js
 
 def receive_full_message(connection_socket, buff_size, end_of_header):
 
@@ -37,20 +38,19 @@ def contains_end_of_message(message, end_sequence):
 	return message.endswith(end_sequence)
 
 
-def remove_end_of_message(full_message, end_sequence):
-	index = full_message.rfind(end_sequence)
-	return full_message[:index]
-
-
 def parse_HTTP_message(http_message:bytes):
 	header_end= "\r\n\r\n"
 	index = http_message.decode().rfind(header_end)
-	(header, message) = (http_message[:index] , http_message[(index + len(header_end)):])
+	header = http_message[:index].split(b"\r\n")
+	message = http_message[(index + len(header_end)):]
 	return (header, message)
 
 def create_HTTP_message(message_pair):
 	header, message = message_pair[0], message_pair[1]
-	http_message = header + b"\r\n\r\n" + message
+	header_formed = b""
+	[header_formed := header_formed + bytes(x) + b"\r\n" for x in header]
+
+	http_message = header_formed + b"\r\n" + message
 	return http_message
 
 
@@ -81,11 +81,11 @@ if __name__ == "__main__":
 	while True:
 		# cuando llega una petición de conexión la aceptamos
 		# y se crea un nuevo socket que se comunicará con el cliente
-		new_socket, new_socket_address = server_socket.accept()
+		req_socket, req_socket_address = server_socket.accept()
 
 		# luego recibimos el mensaje usando la función que programamos
 		# esta función entrega el mensaje en string (no en bytes) y sin el end_of_message
-		recv_message = receive_full_message(new_socket, buff_size, end_of_header)
+		recv_message = receive_full_message(req_socket, buff_size, end_of_header)
 
 		print(f' -> Se ha recibido el siguiente mensaje: {recv_message}')
 
@@ -94,29 +94,32 @@ if __name__ == "__main__":
 
 		# respondemos indicando que recibimos el mensaje
 		response_body = b"""
-		<!DOCTYPE html>
-		<html lang="es">
-			<head>
-				<meta charset="UTF-8">
-				<title>Paso 1</title>
-			</head>
-			<body>
-				<h1>Esto es un proxy?</h1>
-			</body>
-		</html>
+<!DOCTYPE html>
+<html lang="es">
+	<head>
+		<meta charset="UTF-8">
+		<title>Paso 1</title>
+	</head>
+	<body>
+		<h1>Esto es un proxy?</h1>
+	</body>
+</html>
 		"""
-		
-		response_header = b"""HTTP/1.1 200 OK\r\nServer: python3.12\r\nX-ElQuePregunta: Joaquin Molina\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length:""" + str(len(response_body)).encode()
+		config = open("config.json", "r")
+		content = js.load(config)
+
+		response_header = b"HTTP/1.1 200 OK\r\nServer: python3.12\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: " + str(len(response_body)).encode() + b"\r\nX-ElQuePregunta: " + content["nombre"].encode()
+
+		response_header = response_header.split(b"\r\n")
 		
 		response_message= create_HTTP_message((response_header,response_body))
 		
-
 		# el mensaje debe pasarse a bytes antes de ser enviado, para ello usamos encode
-		new_socket.send(response_message)
+		req_socket.send(response_message)
 
 		# cerramos la conexión
 		# notar que la dirección que se imprime indica un número de puerto distinto al 5000
-		new_socket.close()
+		req_socket.close()
 		print(f"conexión con {new_socket_address} ha sido cerrada")
 
 		# seguimos esperando por si llegan otras conexiones
