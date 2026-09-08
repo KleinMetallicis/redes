@@ -1,5 +1,6 @@
 import socket
 import json as js
+import sys
 
 def receive_full_message(connection_socket, buff_size, end_of_header):
 
@@ -15,7 +16,7 @@ def receive_full_message(connection_socket, buff_size, end_of_header):
 	while not is_end_of_header:
 		# recibimos un nuevo trozo del mensaje
 		recv_message = connection_socket.recv(buff_size)
-
+		
 		# lo añadimos al mensaje "completo"
 		full_message += recv_message
 
@@ -24,10 +25,11 @@ def receive_full_message(connection_socket, buff_size, end_of_header):
 	# finalmente retornamos el mensaje
 	if full_message.rfind(b'Content-Length:')>=0:
 
-		start_content_length = full_message[full_message.rfind(b'Content-Length:'):]
+		start_content_length = full_message[full_message.rfind(b'Content-Length: ') + len(b'Content-Length: '):]
+		content_length = start_content_length.split(b'\r\n')
+		content_length = content_length[0] 
 
-		content_length = start_content_length[:start_content_length.rfind(b'\r\n')]
-		for i in range(int(content_length)/buff_size):
+		for i in range((int(content_length.decode())//buff_size)+1):
 			recv_message = connection_socket.recv(buff_size)
 			full_message += recv_message
 
@@ -35,7 +37,7 @@ def receive_full_message(connection_socket, buff_size, end_of_header):
 
 
 def contains_end_of_message(message, end_sequence):
-	return message.endswith(end_sequence)
+	return message.rfind(end_sequence) >= 0
 
 
 def parse_HTTP_message(http_message:bytes):
@@ -56,7 +58,7 @@ def create_HTTP_message(message_pair):
 
 if __name__ == "__main__":
 	# definimos el tamaño del buffer de recepción y la secuencia de fin de mensaje
-	buff_size = 64
+	buff_size = 50
 	end_of_header = "\r\n\r\n"
 	new_socket_address = ("localhost", 8000)
 	
@@ -88,33 +90,89 @@ if __name__ == "__main__":
 		recv_message = receive_full_message(req_socket, buff_size, end_of_header)
 		
 		(req_header, req_body) = parse_HTTP_message(recv_message)
+		
 
-		req_host = [match for match in req_header if b"Host" in match]
+		req_host = [match for match in req_header if b"Host:" in match]
 		req_host = req_host[0]
-		req_host = req_host[req_host.rfind(b"Host: ") + len(b"Host: "):]
-		
-		config = open("config.json", "r")
-		content = js.load(config)
-		
-		out_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		
-		out_socket.connect((req_host.decode(),80))
-		out_socket.send(recv_message)
-		server_response = receive_full_message(out_socket, buff_size, end_of_header)
-		out_socket.close()
-		req_socket.send(server_response)
-		req_socket.close()
+		req_host = req_host[len(b"Host: "):]
+		req_host = req_host.decode()
 
 
 
-		"""response_message= create_HTTP_message((response_header,response_body))
-		
-		# el mensaje debe pasarse a bytes antes de ser enviado, para ello usamos encode
-		req_socket.send(response_message)
+		#config = open("config.json", "r")
+		#content = js.load(config)
+		print(req_host)
+		banned = open("banlist.json", "r")
+		banlist = js.load(banned)
+		first_line = req_header[0].decode()
+		print(first_line)
+		if first_line.rfind("http://") < 0:
+			full_url=req_host + first_line[first_line.rfind("/"):first_line.rfind("HTTP") - 1]
+		else:
+			full_url = first_line[first_line.rfind("http://")+ len("http://"): first_line.rfind("HTTP/") -1]
 
-		# cerramos la conexión
-		# notar que la dirección que se imprime indica un número de puerto distinto al 5000
-		req_socket.close()
-		print(f"conexión con {new_socket_address} ha sido cerrada")
+		if full_url in banlist["blocked"]:
+			
+			res_header = [b'HTTP/1.1 403 Forbidden', b'Content-Type: text/html', b'Host: localhost:8000']
+			res_body = "<img src=[cute-cat-say-no-with-round-background-flat-cartoon-illustration-png.png]>"
+			res_header.append(b'Content-Length: ' + str(len(res_body)).encode())
+			response = create_HTTP_message((res_header, res_body.encode()))
+			req_socket.send(response)
+			req_socket.close()
+		elif full_url.rfind("[")>=0:
+			res_header = [b'HTTP/1.1 200 OK', b'Content-Type: image/png', b'Host: localhost:8000']
+			image_file = open("cute-cat-say-no-with-round-background-flat-cartoon-illustration-png.png","rb")
+			image = image_file.read()
+			length = len(image)
+			res_header.append(b'Content-Length: ' + str(length).encode())
+			res_body = image
+			response = create_HTTP_message((res_header, res_body)) 
+			req_socket.send(response)
+			req_socket.close()
+		else:
+			
+			out_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-		# seguimos esperando por si llegan otras conexiones"""
+			if req_host.rfind(":")>=0:
+				req_host = req_host.split(":")
+				out_socket.connect((req_host[0], int(req_host[1])))	
+			else:
+				out_socket.connect((req_host, 80))
+			
+			
+
+			config = js.load(open("config.json" , "r"))
+
+			req_header.append(b'X-ElQuePregunta: ' + config["nombre"].encode())
+			
+			out_msg= create_HTTP_message((req_header,req_body))
+
+
+			out_socket.send(out_msg)
+			server_response = receive_full_message(out_socket, buff_size, end_of_header)
+			out_socket.close()
+
+			(resp_head, resp_body) = parse_HTTP_message(server_response)
+			
+			for word in banlist["forbidden_words"]:
+				key = list(word.keys())[0]
+
+				resp_body = resp_body.replace(key.encode(), word[key].encode())
+			
+			server_response = create_HTTP_message((resp_head,resp_body))
+			req_socket.send(server_response)
+			req_socket.close()
+
+
+
+			"""response_message= create_HTTP_message((response_header,response_body))
+			
+			# el mensaje debe pasarse a bytes antes de ser enviado, para ello usamos encode
+			req_socket.send(response_message)
+
+			# cerramos la conexión
+			# notar que la dirección que se imprime indica un número de puerto distinto al 5000
+			req_socket.close()
+			print(f"conexión con {new_socket_address} ha sido cerrada")
+
+			# seguimos esperando por si llegan otras conexiones"""
