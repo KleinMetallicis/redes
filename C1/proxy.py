@@ -58,9 +58,10 @@ def create_HTTP_message(message_pair):
 
 if __name__ == "__main__":
 	# definimos el tamaño del buffer de recepción y la secuencia de fin de mensaje
-	buff_size = 50
+	args = sys.argv
+	buff_size = args[2]
 	end_of_header = "\r\n\r\n"
-	new_socket_address = ("localhost", 8000)
+	new_socket_address = (args[1], 8000)
 	
 
 	print('Creando socket - Servidor')
