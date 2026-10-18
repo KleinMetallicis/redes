@@ -1,0 +1,182 @@
+import socket, random
+
+BUFF_SIZE = 16
+TIMEOUT = 2
+
+class SocketTCP:
+    def __init__(self):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.settimeout(TIMEOUT)
+        self.address = None
+        self.destiny = None
+        self.seq = 0
+        self.expected_seq = 0
+        self.buffer = b''
+
+    def parse_segment(self, segment: bytes):
+        segment_list = segment.split(b'|||')
+        headers = [bool(int(x)) for x in segment_list[:3]]
+        headers.append(int(segment_list[3]))
+        data = b''
+        try:
+            data = segment_list[4]
+        except:
+            pass
+        syn, ack, fin, seq = headers
+        return (syn, ack, fin, seq, data.decode())
+
+    def create_segment(self, tuple):
+        segment = '|||'.join([str(int(element)) for element in tuple[:4]]) + '|||' + tuple[4]
+        segment = segment.encode()
+        return segment
+
+    def bind(self, address):
+        self.address = address
+        self.socket.bind(self.address)
+    
+    def connect(self, destiny):
+        self.seq = random.randint(0,100)
+        self.expected_seq = self.seq
+        self.destiny = destiny
+        while True:
+            try:
+                syn_segment = self.create_segment((1, 0, 0, self.seq, ''))
+                
+                self.socket.sendto(syn_segment, destiny)
+                while True:
+                    data, addr = self.socket.recvfrom(1024) 
+                    syn, ack, _, seq, _ = self.parse_segment(data)
+                    if syn and ack and (seq == self.expected_seq):
+                        break
+                
+                self.seq += 1
+                self.expected_seq +=1
+                ack_seg = self.create_segment((0, 1, 0, self.seq, ''))
+                self.socket.sendto(ack_seg, destiny)
+            except socket.timeout:
+                print("timeout")
+                continue
+
+    def accept(self):
+        while True:
+            try:
+                
+                data, address = self.socket.recvfrom(1024)
+                syn, ack, fin, seq, body = self.parse_segment(data)
+                
+                if syn and not ack:
+                    self.destiny = address
+                    self.seq = seq
+                    syn_ack_seg = self.create_segment((1, 1, 0, self.seq, ''))
+                    self.socket.sendto(syn_ack_seg, address)
+                    self.expected_seq = self.seq +1
+                    
+                    while True:
+                        
+                        data, addr = self.socket.recvfrom(1024)
+                        syn2, ack2, fin2, seq2, body2 = self.parse_segment(data)
+                        if ack2 and not syn2 and addr == address and seq2 == self.expected_seq:
+                            
+                            new_socket = SocketTCP()
+                            new_socket.address = (self.address[0], self.address[1] + 1)
+                            new_socket.destiny = address
+
+                            new_socket.bind(new_socket.address)
+
+                            new_socket.seq = seq2
+                            new_socket.expected_seq = new_socket.seq + 1
+                            print("Connection accepted from " + str(address))
+                            return new_socket, new_socket.address
+            except socket.timeout:
+                continue
+
+    def send(self, message):
+        out = message
+        message_length = len(message)
+        first_mssg = self.create_segment((0,0,0,self.seq, str(message_length)))
+        tries = 0
+        ready = False
+        while not ready:
+            try:
+                self.socket.sendto(first_mssg, self.destiny)
+                data, addr = self.socket.recvfrom(1024)
+                _, ack, _, seq, _ = self.parse_segment(data)
+                if (seq == self.expected_seq) and ack:
+                    ready = True
+                    self.seq += 1
+                    self.expected_seq +=1
+                    tries = 0
+                else:
+                    continue
+            except socket.timeout:
+                if tries >= 3:
+                    return "No hay conexión con el servidor"
+                else:
+                    tries +=1
+        
+        while out:
+            try:
+                out_mssg = out[16:]
+                out_seg = self.create_segment((0, 0, 0, self.seq, out_mssg))
+                self.socket.sendto(out_seg, self.destiny)
+                _,ack,_,seq,_ = self.socket.recvfrom(1024)
+                if ack and (seq == self.expected_seq):
+                    out = out[:16]
+                    self.expected_seq += 1
+                    self.seq += 1
+                    tries = 0
+                else:
+                    continue
+
+            except socket.timeout:
+                if tries >= 3:
+                    return "Fallo de conexión"
+                else:
+                    tries += 1
+
+    def recv(self, buff_size):
+        head_length = len(b'0|||0|||0|||0|||')
+        calc_buffer = head_length + buff_size
+        data, addr = self.socket.recvfrom(calc_buffer)
+        print(data)
+        _,_,_, seq, message_length = self.parse_segment(data)
+        if seq == self.expected_seq:
+            first_ack = self.create_segment((0,1,0, seq, ''))
+            self.socket.sendto(first_ack, addr)
+            self.seq = seq
+            self.expected_seq = seq + 1
+        
+        remaining_message = message_length
+        message = ''
+        while remaining_message:
+            
+            if remaining_message > buff_size:
+                data, addr = self.socket.recvfrom(calc_buffer)
+                _,_,_, seq, body = self.parse_segment(data)
+                if self.expected_seq == seq:
+                    message += body
+                    ack_seg = self.create_segment((0,1,0,seq,''))
+                    self.socket.sendto(ack_seg, addr)
+                    self.seq += 1
+                    self.expected_seq +=1
+                    remaining_message -= buff_size
+                
+                else:
+                    continue
+            
+            else:
+                data, addr = self.socket.recvfrom(head_length + remaining_message)
+                _,_,_, seq, body = self.parse_segment(data)
+                if self.expected_seq == seq:
+                    message += body
+                    ack_seg = self.create_segment((0,1,0,seq,''))
+                    self.socket.sendto(ack_seg, addr)
+                    self.seq += 1
+                    self.expected_seq +=1
+                    remaining_message -= remaining_message
+                
+                else:
+                    continue
+    
+    def close(self):
+        pass
