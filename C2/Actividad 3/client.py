@@ -5,12 +5,11 @@ socket = SocketTCP()
 
 addr = sys.argv[1]
 port = sys.argv[2]
+mssg = sys.stdin.buffer.read().decode()
+
 
 address = (addr, int(port))
 
-
-mssg = input()
-print(mssg)
 
 socket.connect(address)
 

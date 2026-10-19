@@ -5,9 +5,11 @@ socket = SocketTCP()
 address = ('localhost', 8000)
 socket.bind(address)
 
-socket.accept()
 
 
-rcv = socket.recv(16)
+listener_data = socket.accept()
+listener = listener_data[0]
+
+rcv = listener.recv(16)
 
 print(rcv)
