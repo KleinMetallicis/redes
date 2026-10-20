@@ -28,8 +28,8 @@ class SocketTCP(SocketUDP):
         return (syn, ack, fin, seq, data)
 
     def create_segment(self, tuple):
-        segment = '|||'.join([str(int(element)) for element in tuple[:4]]) + '|||' + tuple[4]
-        segment = segment.encode()
+        segment = b'|||'.join([bytes(int(element)) for element in tuple[:4]]) + b'|||' + tuple[4]
+        
         return segment
 
     def bind(self, address):

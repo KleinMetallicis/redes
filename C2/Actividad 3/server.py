@@ -12,4 +12,5 @@ listener = listener_data[0]
 
 rcv = listener.recv(16)
 
-print(rcv)
+result = open("result", "wb+")
+result.write(rcv)
