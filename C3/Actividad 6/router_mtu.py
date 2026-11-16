@@ -26,15 +26,16 @@ def parse_packet(IP_packet: bytes):
     parsed_port = "".join(parsed_port)
 
     parsed_ttl = ttl[0]
-    parsed_ID = ID.decode()
-    parsed_size = size.decode()
+    parsed_ID = int.from_bytes(ID)
+    parsed_offset = int.from_bytes(offset)
+    parsed_size = int.from_bytes(size)
     parsed_FLAG = FLAG[0]
 
     parsed_msg = msg.decode()
 
-    return parsed_address, parsed_port, parsed_ttl, parsed_ID, parsed_size, parsed_FLAG, parsed_msg
+    return parsed_address, parsed_port, parsed_ttl, parsed_ID, parsed_offset, parsed_size, parsed_FLAG, parsed_msg
 
-def create_packet(parsed_address, parsed_port, parsed_ttl, parsed_ID, parsed_size, parsed_FLAG, msg):
+def create_packet(parsed_address, parsed_port, parsed_ttl, parsed_ID, parsed_offset, parsed_size, parsed_FLAG, msg):
     
 
     encoded = parsed_address.split(".")
@@ -50,6 +51,8 @@ def create_packet(parsed_address, parsed_port, parsed_ttl, parsed_ID, parsed_siz
     packet.extend(int(parsed_ttl).to_bytes(1))
 
     packet.extend(int(parsed_ID).to_bytes(4))
+
+    packet.extend(int(parsed_offset).to_bytes(4))
 
     packet.extend(int(parsed_size).to_bytes(4))
 
@@ -72,7 +75,7 @@ def check_routes(round_robin: tuple[dict, dict, dict], destination_address: tupl
             dest_address = round_robin_choices[route][count[0]%count[1]]
             dest_mtu = round_robin_mtu[route][count[0]%count[1]]
             round_robin_count[route][0] += 1
-            return dest_address, dest_mtu
+            return dest_address, int(dest_mtu)
                    
 def create_rr_struct(routes_file_name: str):
     route_table = open(routes_file_name, "r")
@@ -98,15 +101,55 @@ def fragment_IP_packet(IP_packet, MTU):
     if len(IP_packet) <= MTU:
         return [IP_packet]
     else:
-        ip, port, ttl, ID, size, FLAG, data = parse_packet(IP_packet)
+        ip, port, ttl, ID, offset, size, FLAG, data = parse_packet(IP_packet)
         data_size = MTU - 20 #HEAD size
         packet_array = []
+        
         while len(data) > data_size:
             frag_data = data[:data_size]
-            packet_array += [create_packet(ip,port,ttl,ID,len(frag_data), 1, frag_data)]
+            packet_array += [create_packet(ip,port,ttl,ID, offset,len(frag_data), 1, frag_data)]
+            offset += data_size
             data = data[data_size:]
-        packet_array += [create_packet(ip,port,ttl,ID,len(data), 0, data)]
+        packet_array += [create_packet(ip,port,ttl,ID, offset, len(data), FLAG, data)]
         return packet_array
+        
+def reassemble_IP_packet(fragment_list):
+    parsed_fragments = [parse_packet(x) for x in fragment_list]
+    
+    if (len(parsed_fragments) == 1) and not parsed_fragments[0][6] and not parsed_fragments[0][4]:
+        return fragment_list[0]
+    else:
+        ordered_frags = []
+        offset_list = [fragment[4] for fragment in parsed_fragments]
+        while parsed_fragments:
+            index = offset_list.index(min(offset_list))
+            ordered_frags += [parsed_fragments[index]]
+            parsed_fragments.pop(index)
+            offset_list.pop(index)
+
+        ordered_offset_list = [fragment[4] for fragment in ordered_frags]
+        ordered_size_list = [fragment[5] for fragment in ordered_frags]
+        if ordered_offset_list[0]:
+            print("first value is not offset 0")
+            return None
+        
+        if ordered_frags[-1][6]:
+            print("not final packet")
+            return None
+
+        for i in range(len(ordered_frags)-1):
+            if (ordered_offset_list[i] + ordered_size_list[i]) != ordered_offset_list[i+1]:
+                print("missing packets")
+                return None
+
+        else:
+            full_data = [fragment[-1] for fragment in ordered_frags]
+            full_data = "".join(full_data)
+            ip,port,ttl,ID, offset, size, FLAG, data = ordered_frags[0]
+            reassembled_packet = create_packet(ip,port,ttl,ID,0,len(full_data),0,full_data)
+            return reassembled_packet
+        
+        
         
 
         
@@ -119,18 +162,32 @@ if __name__ == "__main__":
     socket.bind(socket_address)
     round_robin = create_rr_struct(route_table)
 
+    recieved_msgs = dict()
+
     while True:
         msg, address = socket.recvfrom(1024)
-        ip_msg, port_msg, ttl_msg, text_msg = parse_packet(msg)
+        
+        ip_msg, port_msg, ttl_msg, ID, offset, size, FLAG, text_msg = parse_packet(msg)
         if int(ttl_msg) > 0:
             if (ip_msg, int(port_msg)) == socket_address:
-                print(text_msg)
+                try:
+                    recieved_msgs[ID] += [msg]
+                except:
+                    recieved_msgs[ID] = [msg]
+                reassembled_packet = reassemble_IP_packet(recieved_msgs[ID])
+                #print(recieved_msgs[ID])
+                if reassembled_packet:
+                    print(parse_packet(reassembled_packet)[-1])
+                
+                
             else:
-                dest_address = check_routes(round_robin, (ip_msg, int(port_msg)))
+                dest_address, MTU = check_routes(round_robin, (ip_msg, int(port_msg)))
                 if dest_address:
+                    forward_packet = create_packet(ip_msg, port_msg, ttl_msg - 1, ID, offset, size, FLAG, text_msg)
+                    packet_list = fragment_IP_packet(msg, MTU)
                     print(f"redirigiendo paquete {msg} con destino final {(ip_msg, port_msg)} desde {socket_address} hacia {dest_address}")
-                    forward_packet = create_packet(ip_msg, port_msg, ttl_msg - 1, text_msg)
-                    socket.sendto(forward_packet, dest_address)
+                    for packet in packet_list:
+                        socket.sendto(packet, dest_address)
                 else:
                     print(f"No hay rutas hacia {(ip_msg,port_msg)} para paquete {msg}")
         else:
