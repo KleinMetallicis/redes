@@ -16,6 +16,6 @@ if __name__ == "__main__":
         socket.sendto(ip_packet, (ip_ini, int(port_ini)))
     elif sys.argv[1] == "TTL":
         ip_ini, port_ini, ip_dest, port_dest, ttl, msg = sys.argv[2:]
-        ip_packet = create_packet(ip_dest, port_dest, ttl, msg)
+        ip_packet = create_packet_ttl(ip_dest, port_dest, ttl, msg)
         socket.sendto(ip_packet, (ip_ini, int(port_ini)))
     

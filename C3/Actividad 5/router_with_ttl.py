@@ -32,7 +32,7 @@ def create_packet(parsed_address, parsed_port, parsed_ttl, msg):
     packet = bytearray()
     for x in encoded:
         packet.extend(x)
-    port = int(parsed_port).to_bytes(2)
+    packet.extend(int(parsed_port).to_bytes(2))
 
     packet.extend(int(parsed_ttl).to_bytes(1))
     
