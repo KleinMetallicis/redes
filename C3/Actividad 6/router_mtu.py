@@ -19,11 +19,7 @@ def parse_packet(IP_packet: bytes):
     
     parsed_address = ".".join(parsed_address)
     
-    parsed_port = []
-    for byte in bytes(port):
-        parsed_port+=[str(byte).zfill(2)]
-    
-    parsed_port = "".join(parsed_port)
+    parsed_port = int.from_bytes(port)
 
     parsed_ttl = ttl[0]
     parsed_ID = int.from_bytes(ID)
@@ -43,10 +39,7 @@ def create_packet(parsed_address, parsed_port, parsed_ttl, parsed_ID, parsed_off
     packet = bytearray()
     for x in encoded:
         packet.extend(x)
-    port = [parsed_port[:2]] + [parsed_port[2:]]
-    
-    for x in port:
-        packet.extend(int(x).to_bytes(1))
+    packet.extend(int(parsed_port).to_bytes(2))
 
     packet.extend(int(parsed_ttl).to_bytes(1))
 

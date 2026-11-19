@@ -6,5 +6,5 @@ if __name__ == "__main__":
     ip, port, ttl, ID = sys.argv[1:]
     msg = sys.stdin.buffer.read().decode()
     msg = create_packet(ip, port, ttl, ID, 0, len(msg), 0, msg)
-    print(msg)
+    
     result.write(msg)
